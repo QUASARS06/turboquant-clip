@@ -112,16 +112,26 @@ def _l2_normalize(x: np.ndarray) -> np.ndarray:
 
 @torch.no_grad()
 def _encode_image_batch(model, processor, pil_images, device):
+    # Some transformers versions have altered `get_image_features`'s return
+    # type (tensor vs BaseModelOutputWithPooling). Call the sub-modules directly
+    # so behavior is stable across versions.
     inputs = processor(images=pil_images, return_tensors="pt").to(device)
-    feats = model.get_image_features(**inputs).cpu().numpy().astype(np.float32)
-    return _l2_normalize(feats)
+    vision_out = model.vision_model(pixel_values=inputs["pixel_values"])
+    pooled = vision_out.pooler_output if hasattr(vision_out, "pooler_output") else vision_out[1]
+    feats = model.visual_projection(pooled)
+    return _l2_normalize(feats.cpu().numpy().astype(np.float32))
 
 
 @torch.no_grad()
 def _encode_text_batch(model, processor, texts, device):
     inputs = processor(text=texts, return_tensors="pt", padding=True, truncation=True).to(device)
-    feats = model.get_text_features(**inputs).cpu().numpy().astype(np.float32)
-    return _l2_normalize(feats)
+    text_out = model.text_model(
+        input_ids=inputs["input_ids"],
+        attention_mask=inputs.get("attention_mask"),
+    )
+    pooled = text_out.pooler_output if hasattr(text_out, "pooler_output") else text_out[1]
+    feats = model.text_projection(pooled)
+    return _l2_normalize(feats.cpu().numpy().astype(np.float32))
 
 
 def encode(out_dir: Path) -> None:
