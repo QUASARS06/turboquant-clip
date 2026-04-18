@@ -83,7 +83,11 @@ def _existing_chunks(chunk_dir: Path) -> set[int]:
 def _save_chunk(chunk_dir: Path, idx: int, arr: np.ndarray) -> None:
     tmp = chunk_dir / f"chunk_{idx:05d}.npy.tmp"
     final = chunk_dir / f"chunk_{idx:05d}.npy"
-    np.save(tmp, arr)
+    # np.save auto-appends ".npy" unless given a file handle, which would
+    # turn "chunk_00000.npy.tmp" into "chunk_00000.npy.tmp.npy". Write via
+    # a handle so the on-disk name matches `tmp` exactly.
+    with open(tmp, "wb") as f:
+        np.save(f, arr)
     os.replace(tmp, final)  # atomic so a crash mid-save never leaves a corrupt chunk
 
 
