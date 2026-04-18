@@ -72,13 +72,30 @@ def _save_chunk(chunk_dir: Path, idx: int, arr: np.ndarray) -> None:
 
 
 def _load_dataset_sorted():
-    """Load the 'test' split of nlphuji/flickr30k (30014 unique images).
+    """Load nlphuji/flickr30k via the auto-converted parquet revision.
 
-    We sort by 'img_id' to make the iteration order deterministic, so that
-    resuming a crashed run produces bit-identical chunk contents."""
-    ds = load_dataset("nlphuji/flickr30k", split="test")
-    ds = ds.sort("img_id")
-    return ds
+    `datasets>=3.0` refuses to execute loading scripts, but every HF dataset
+    has an auto-generated parquet snapshot on the hidden `refs/convert/parquet`
+    branch. We load that branch, so no script execution happens.
+
+    The parquet branch names the split 'TEST' (uppercase). We sort by 'img_id'
+    to make iteration order deterministic so resuming produces bit-identical chunks.
+    """
+    try:
+        ds = load_dataset(
+            "nlphuji/flickr30k",
+            split="TEST",
+            revision="refs/convert/parquet",
+        )
+    except Exception:
+        # Fallback: lower-case split name in case upstream renames it.
+        ds = load_dataset(
+            "nlphuji/flickr30k",
+            split="test",
+            revision="refs/convert/parquet",
+        )
+    sort_key = "img_id" if "img_id" in ds.column_names else ds.column_names[0]
+    return ds.sort(sort_key)
 
 
 def _load_clip(device: str):

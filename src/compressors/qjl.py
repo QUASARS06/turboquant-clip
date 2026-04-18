@@ -49,27 +49,34 @@ class QJL(Compressor):
     def fit(self, X: np.ndarray) -> "QJL":
         return self
 
-    def encode(self, X: np.ndarray) -> np.ndarray:
-        """Returns packed bits of shape (N, ceil(m/8)) uint8."""
-        projected = X @ self.S.T          # (N, m)
-        signs = projected >= 0            # (N, m) bool
-        return np.packbits(signs, axis=1, bitorder="little")
+    def encode(self, X: np.ndarray) -> dict:
+        """Returns a dict of {"norms": (N,) float32, "signs": packed bits uint8}.
 
-    def _unpack(self, code: np.ndarray) -> np.ndarray:
-        bits = np.unpackbits(code, axis=1, count=self.m, bitorder="little")
+        We normalize to unit length before sign-sketching because the QJL
+        estimator naturally recovers <q, x>/||x||. Storing ||x|| (4 bytes, i.e.
+        0.06 bits/dim for d=512) lets us handle non-unit vectors like the
+        residuals produced by TurboQuant.
+        """
+        norms = np.linalg.norm(X, axis=1).astype(np.float32)
+        safe = np.maximum(norms, 1e-12)[:, None]
+        projected = (X / safe) @ self.S.T              # (N, m)
+        signs = projected >= 0                          # (N, m) bool
+        return {
+            "norms": norms,
+            "signs": np.packbits(signs, axis=1, bitorder="little"),
+        }
+
+    def _unpack(self, packed: np.ndarray) -> np.ndarray:
+        bits = np.unpackbits(packed, axis=1, count=self.m, bitorder="little")
         return np.where(bits.astype(bool), 1.0, -1.0).astype(np.float32)
 
-    def ip_estimate(self, Q: np.ndarray, code: np.ndarray) -> np.ndarray:
+    def ip_estimate(self, Q: np.ndarray, code: dict) -> np.ndarray:
         Q_proj = (Q @ self.S.T).astype(np.float32)      # (nq, m)
-        signs = self._unpack(code)                      # (N, m)
+        signs = self._unpack(code["signs"])             # (N, m)
         scale = np.sqrt(np.pi / 2.0) / self.m
-        return scale * (Q_proj @ signs.T)
-
-    def ip_estimate_signs(self, Q: np.ndarray, signs: np.ndarray) -> np.ndarray:
-        """Variant that takes already-unpacked {+1,-1} signs. Used by TurboQuant."""
-        Q_proj = (Q @ self.S.T).astype(np.float32)
-        scale = np.sqrt(np.pi / 2.0) / self.m
-        return scale * (Q_proj @ signs.T.astype(np.float32))
+        unit_ip = scale * (Q_proj @ signs.T)            # estimates <q, x/||x||>
+        return unit_ip * code["norms"][None, :]         # -> <q, x>
 
     def bytes_per_vector(self) -> float:
-        return self.m / 8.0
+        # signs: m bits; norm: 32 bits
+        return self.m / 8.0 + 4.0
