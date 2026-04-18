@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -57,11 +58,26 @@ def _chunk_dir(out_dir: Path, which: str) -> Path:
     return d
 
 
+_CHUNK_RE = re.compile(r"^chunk_(\d+)\.npy$")
+
+
 def _existing_chunks(chunk_dir: Path) -> set[int]:
-    return {
-        int(p.stem.split("_")[1])
-        for p in chunk_dir.glob("chunk_*.npy")
-    }
+    """Return indices of completed chunks. Cleans up stale .tmp files from
+    crashed prior runs. pathlib's `glob("chunk_*.npy")` also matches
+    `chunk_*.npy.tmp` on some filesystems (Google Drive especially), so we
+    iterate with an explicit regex instead."""
+    out: set[int] = set()
+    for p in chunk_dir.iterdir():
+        if p.name.endswith(".npy.tmp"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+            continue
+        m = _CHUNK_RE.match(p.name)
+        if m:
+            out.add(int(m.group(1)))
+    return out
 
 
 def _save_chunk(chunk_dir: Path, idx: int, arr: np.ndarray) -> None:
