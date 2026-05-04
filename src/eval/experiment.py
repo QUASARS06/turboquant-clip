@@ -57,6 +57,12 @@ def _applicable(method: str, bits: int) -> bool:
         return bits == 32
     if method == "faiss_pq":
         return bits in FAISS_SUPPORTED_BITS
+    # PolarQuant/TurboQuant fit and encode cost scales with 2**angle_bits.
+    # At 8 bits the (N, angles, 256) broadcast in _quantize_to_codebook blows
+    # past 16 GB on a full CLIP DB. 4 bits is already near-lossless, so 8-bit
+    # carries no additional signal for the cross-modal vs same-modal story.
+    if method in ("polarquant", "turboquant"):
+        return bits in (1, 2, 3, 4)
     return bits in (1, 2, 3, 4, 8)
 
 
